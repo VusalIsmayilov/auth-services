@@ -87,8 +87,8 @@ namespace AuthService.Services
                     .Select(g => new
                     {
                         Total = g.Count(),
-                        Active = g.Count(rt => rt.IsActive),
-                        Expired = g.Count(rt => rt.IsExpired && !rt.IsRevoked),
+                        Active = g.Count(rt => !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow),
+                        Expired = g.Count(rt => rt.ExpiresAt < DateTime.UtcNow && !rt.IsRevoked),
                         Revoked = g.Count(rt => rt.IsRevoked)
                     })
                     .FirstOrDefaultAsync();
