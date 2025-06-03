@@ -1,8 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using AuthService.Data;
-using AuthService.DTOs;
 using AuthService.Models;
 using AuthService.Services.Interfaces;
-using Microsoft.EntityFrameworkCore;
+using AuthService.DTOs;
 
 namespace AuthService.Services
 {
@@ -10,8 +10,9 @@ namespace AuthService.Services
     {
         private readonly AuthDbContext _context;
         private readonly ILogger<OtpService> _logger;
-        private readonly int _otpExpiryMinutes = 5;
-        private readonly int _maxAttempts = 3;
+        private readonly TimeSpan _otpExpiryTime = TimeSpan.FromMinutes(5);
+        private readonly int _maxOtpAttempts = 3;
+        private readonly TimeSpan _rateLimitWindow = TimeSpan.FromHours(1);
 
         public OtpService(AuthDbContext context, ILogger<OtpService> logger)
         {
@@ -19,61 +20,94 @@ namespace AuthService.Services
             _logger = logger;
         }
 
-        public async Task<OtpResponse> GenerateOtpAsync(string phoneNumber)
+
+        public async Task CleanupExpiredOtpsAsync()
+        {
+            // Implement the logic to clean up expired OTPs
+            // For example:
+            var expiredOtps = await _context.OtpTokens
+                .Where(t => t.ExpiresAt < DateTime.UtcNow)
+                .ToListAsync();
+
+            _context.OtpTokens.RemoveRange(expiredOtps);
+            await _context.SaveChangesAsync();
+        }
+        public async Task<OtpResult> SendOtpAsync(string phoneNumber)
         {
             try
             {
-                // Clean up old OTPs for this phone number
-                await CleanupOldOtpsAsync(phoneNumber);
-
-                // Check rate limiting (max 3 OTPs per hour)
-                var recentOtps = await _context.OtpTokens
-                    .Where(o => o.PhoneNumber == phoneNumber &&
-                               o.CreatedAt > DateTime.UtcNow.AddHours(-1))
-                    .CountAsync();
-
-                if (recentOtps >= 3)
+                // Check rate limiting
+                if (!await CanSendOtpAsync(phoneNumber))
                 {
-                    return new OtpResponse
+                    _logger.LogWarning("OTP rate limit exceeded for phone: {PhoneNumber}", phoneNumber);
+                    return new OtpResult
                     {
                         Success = false,
                         Message = "Too many OTP requests. Please try again later."
                     };
                 }
 
-                // Generate 6-digit OTP
-                var otpCode = GenerateOtpCode();
-                var expiresAt = DateTime.UtcNow.AddMinutes(_otpExpiryMinutes);
+                // Find user by phone number
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber);
 
-                // Find or create user
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber);
                 if (user == null)
                 {
-                    user = new User
+                    _logger.LogWarning("OTP request for non-existent phone: {PhoneNumber}", phoneNumber);
+                    return new OtpResult
                     {
-                        PhoneNumber = phoneNumber,
-                        IsPhoneVerified = false
+                        Success = false,
+                        Message = "Phone number not found."
                     };
-                    _context.Users.Add(user);
-                    await _context.SaveChangesAsync();
                 }
 
-                // Save OTP to database
+                // Invalidate any existing OTP tokens for this phone
+                var existingTokens = await _context.OtpTokens
+                    .Where(t => t.PhoneNumber == phoneNumber && !t.IsUsed)
+                    .ToListAsync();
+
+                foreach (var token in existingTokens)
+                {
+                    token.IsUsed = true;
+                    token.UsedAt = DateTime.UtcNow;
+                }
+
+                // Generate new OTP
+                var otpCode = GenerateOtpCode();
+                var expiresAt = DateTime.UtcNow.Add(_otpExpiryTime);
+
                 var otpToken = new OtpToken
                 {
                     UserId = user.Id,
                     Token = otpCode,
                     PhoneNumber = phoneNumber,
-                    ExpiresAt = expiresAt
+                    ExpiresAt = expiresAt,
+                    CreatedAt = DateTime.UtcNow,
+                    IsUsed = false,
+                    AttemptCount = 0
                 };
 
                 _context.OtpTokens.Add(otpToken);
                 await _context.SaveChangesAsync();
 
-                // Send OTP (simulated)
-                await SendOtpAsync(phoneNumber, otpCode);
+                // Send OTP (simulate sending - replace with real SMS service)
+                var sent = await SendOtpSmsAsync(phoneNumber, otpCode);
+                if (!sent)
+                {
+                    // Mark as used if sending failed
+                    otpToken.IsUsed = true;
+                    otpToken.UsedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync();
 
-                return new OtpResponse
+                    return new OtpResult
+                    {
+                        Success = false,
+                        Message = "Failed to send OTP. Please try again."
+                    };
+                }
+
+                _logger.LogInformation("OTP sent successfully to phone: {PhoneNumber}", phoneNumber);
+                return new OtpResult
                 {
                     Success = true,
                     Message = "OTP sent successfully",
@@ -82,43 +116,42 @@ namespace AuthService.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error generating OTP for phone number: {PhoneNumber}", phoneNumber);
-                return new OtpResponse
+                _logger.LogError(ex, "Error sending OTP to phone: {PhoneNumber}", phoneNumber);
+                return new OtpResult
                 {
                     Success = false,
-                    Message = "Failed to generate OTP. Please try again."
+                    Message = "An error occurred while sending OTP."
                 };
             }
         }
 
-        public async Task<bool> ValidateOtpAsync(string phoneNumber, string otpCode)
+        public async Task<bool> VerifyOtpAsync(string phoneNumber, string otpCode)
         {
             try
             {
                 var otpToken = await _context.OtpTokens
-                    .Where(o => o.PhoneNumber == phoneNumber &&
-                               o.Token == otpCode &&
-                               !o.IsUsed &&
-                               o.ExpiresAt > DateTime.UtcNow)
+                    .Where(t => t.PhoneNumber == phoneNumber &&
+                               t.Token == otpCode &&
+                               !t.IsUsed &&
+                               t.ExpiresAt > DateTime.UtcNow)
+                    .OrderByDescending(t => t.CreatedAt)
                     .FirstOrDefaultAsync();
 
                 if (otpToken == null)
                 {
-                    // Increment attempt count for existing tokens
-                    var existingTokens = await _context.OtpTokens
-                        .Where(o => o.PhoneNumber == phoneNumber && !o.IsUsed)
-                        .ToListAsync();
+                    _logger.LogWarning("Invalid or expired OTP for phone: {PhoneNumber}", phoneNumber);
 
-                    foreach (var token in existingTokens)
-                    {
-                        token.AttemptCount++;
-                        if (token.AttemptCount >= _maxAttempts)
-                        {
-                            token.IsUsed = true;
-                            token.UsedAt = DateTime.UtcNow;
-                        }
-                    }
+                    // Increment attempt count for any active tokens
+                    await IncrementAttemptCountAsync(phoneNumber, otpCode);
+                    return false;
+                }
 
+                // Check attempt count
+                if (otpToken.AttemptCount >= _maxOtpAttempts)
+                {
+                    _logger.LogWarning("Max OTP attempts exceeded for phone: {PhoneNumber}", phoneNumber);
+                    otpToken.IsUsed = true;
+                    otpToken.UsedAt = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
                     return false;
                 }
@@ -126,71 +159,133 @@ namespace AuthService.Services
                 // Mark OTP as used
                 otpToken.IsUsed = true;
                 otpToken.UsedAt = DateTime.UtcNow;
-
-                // Mark user phone as verified
-                var user = await _context.Users.FindAsync(otpToken.UserId);
-                if (user != null)
-                {
-                    user.IsPhoneVerified = true;
-                    user.LastLoginAt = DateTime.UtcNow;
-                }
+                otpToken.AttemptCount++;
 
                 await _context.SaveChangesAsync();
+
+                _logger.LogInformation("OTP verified successfully for phone: {PhoneNumber}", phoneNumber);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error validating OTP for phone number: {PhoneNumber}", phoneNumber);
+                _logger.LogError(ex, "Error verifying OTP for phone: {PhoneNumber}", phoneNumber);
                 return false;
             }
         }
 
-        public async Task<bool> SendOtpAsync(string phoneNumber, string otpCode)
-        {
-            // Simulate SMS sending
-            // In real implementation, integrate with SMS provider like Twilio, AWS SNS, etc.
-            _logger.LogInformation("Sending OTP {OtpCode} to phone number: {PhoneNumber}", otpCode, phoneNumber);
-
-            // Simulate network delay
-            await Task.Delay(100);
-
-            return true;
-        }
-
-        public async Task CleanupExpiredOtpsAsync()
+        public async Task<bool> CanSendOtpAsync(string phoneNumber)
         {
             try
             {
-                var expiredOtps = await _context.OtpTokens
-                    .Where(o => o.ExpiresAt < DateTime.UtcNow || o.AttemptCount >= _maxAttempts)
-                    .ToListAsync();
+                var cutoffTime = DateTime.UtcNow.Subtract(_rateLimitWindow);
+                var recentOtpCount = await _context.OtpTokens
+                    .CountAsync(t => t.PhoneNumber == phoneNumber &&
+                                    t.CreatedAt > cutoffTime);
 
-                _context.OtpTokens.RemoveRange(expiredOtps);
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation("Cleaned up {Count} expired OTP tokens", expiredOtps.Count);
+                return recentOtpCount < _maxOtpAttempts;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error cleaning up expired OTPs");
+                _logger.LogError(ex, "Error checking OTP rate limit for phone: {PhoneNumber}", phoneNumber);
+                return false; // Fail safe - don't allow sending if there's an error
             }
         }
 
-        private async Task CleanupOldOtpsAsync(string phoneNumber)
+        public async Task<int> GetRemainingAttemptsAsync(string phoneNumber)
         {
-            var oldOtps = await _context.OtpTokens
-                .Where(o => o.PhoneNumber == phoneNumber &&
-                           (o.ExpiresAt < DateTime.UtcNow || o.IsUsed))
-                .ToListAsync();
+            try
+            {
+                var cutoffTime = DateTime.UtcNow.Subtract(_rateLimitWindow);
+                var recentOtpCount = await _context.OtpTokens
+                    .CountAsync(t => t.PhoneNumber == phoneNumber &&
+                                    t.CreatedAt > cutoffTime);
 
-            _context.OtpTokens.RemoveRange(oldOtps);
-            await _context.SaveChangesAsync();
+                return Math.Max(0, _maxOtpAttempts - recentOtpCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting remaining attempts for phone: {PhoneNumber}", phoneNumber);
+                return 0;
+            }
+        }
+
+        private async Task IncrementAttemptCountAsync(string phoneNumber, string otpCode)
+        {
+            try
+            {
+                var otpToken = await _context.OtpTokens
+                    .Where(t => t.PhoneNumber == phoneNumber &&
+                               t.Token == otpCode &&
+                               !t.IsUsed)
+                    .OrderByDescending(t => t.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (otpToken != null)
+                {
+                    otpToken.AttemptCount++;
+
+                    // Mark as used if max attempts reached
+                    if (otpToken.AttemptCount >= _maxOtpAttempts)
+                    {
+                        otpToken.IsUsed = true;
+                        otpToken.UsedAt = DateTime.UtcNow;
+                    }
+
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error incrementing attempt count for phone: {PhoneNumber}", phoneNumber);
+            }
         }
 
         private string GenerateOtpCode()
         {
             var random = new Random();
             return random.Next(100000, 999999).ToString();
+        }
+
+        private async Task<bool> SendOtpSmsAsync(string phoneNumber, string otpCode)
+        {
+            // Simulate SMS sending - replace with actual SMS service implementation
+            // Examples: Twilio, AWS SNS, Azure Communication Services
+
+            try
+            {
+                // Simulate network delay
+                await Task.Delay(100);
+
+                // Log the OTP for development/testing purposes
+                _logger.LogInformation("SMS Simulation: Sending OTP {OtpCode} to {PhoneNumber}", otpCode, phoneNumber);
+
+                // In production, replace this with actual SMS service:
+                /*
+                // Twilio example:
+                var message = await _twilioClient.MessageResource.CreateAsync(
+                    body: $"Your verification code is: {otpCode}",
+                    from: new PhoneNumber(_twilioFromNumber),
+                    to: new PhoneNumber(phoneNumber)
+                );
+                return message.Status == MessageResource.StatusEnum.Queued;
+                
+                // AWS SNS example:
+                var request = new PublishRequest
+                {
+                    PhoneNumber = phoneNumber,
+                    Message = $"Your verification code is: {otpCode}"
+                };
+                var response = await _snsClient.PublishAsync(request);
+                return response.HttpStatusCode == HttpStatusCode.OK;
+                */
+
+                return true; // Simulate successful sending
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send SMS to {PhoneNumber}", phoneNumber);
+                return false;
+            }
         }
     }
 }

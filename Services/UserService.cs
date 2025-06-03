@@ -1,8 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using AuthService.Data;
-using AuthService.DTOs;
 using AuthService.Models;
 using AuthService.Services.Interfaces;
-using Microsoft.EntityFrameworkCore;
+using AuthService.DTOs;
 
 namespace AuthService.Services
 {
@@ -10,274 +10,222 @@ namespace AuthService.Services
     {
         private readonly AuthDbContext _context;
         private readonly IPasswordService _passwordService;
-        private readonly ITokenService _tokenService;
         private readonly IOtpService _otpService;
         private readonly ILogger<UserService> _logger;
 
         public UserService(
             AuthDbContext context,
             IPasswordService passwordService,
-            ITokenService tokenService,
             IOtpService otpService,
             ILogger<UserService> logger)
         {
             _context = context;
             _passwordService = passwordService;
-            _tokenService = tokenService;
             _otpService = otpService;
             _logger = logger;
         }
 
-        public async Task<AuthResponse> RegisterWithEmailAsync(RegisterEmailRequest request)
+        public async Task<User?> RegisterWithEmailAsync(string email, string password)
         {
             try
             {
-                // Check if user already exists
-                var existingUser = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Email == request.Email);
-
-                if (existingUser != null)
+                // Check if email is already in use
+                if (await IsEmailInUseAsync(email))
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "User with this email already exists"
-                    };
+                    _logger.LogWarning("Registration attempted with existing email: {Email}", email);
+                    return null;
                 }
+
+                // Hash the password
+                var passwordHash = _passwordService.HashPassword(password);
 
                 // Create new user
                 var user = new User
                 {
-                    Email = request.Email,
-                    PasswordHash = _passwordService.HashPassword(request.Password),
-                    IsEmailVerified = true, // Auto-verify for simplicity
+                    Email = email,
+                    PasswordHash = passwordHash,
+                    IsEmailVerified = true, // Auto-verify for email registration
+                    IsActive = true,
                     CreatedAt = DateTime.UtcNow
                 };
 
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();
 
-                // Generate token
-                var token = _tokenService.GenerateJwtToken(user.Id, user.Email);
+                // Update last login
+                await UpdateLastLoginAsync(user.Id);
 
-                return new AuthResponse
-                {
-                    Success = true,
-                    Message = "Registration successful",
-                    Token = token,
-                    User = MapToUserInfo(user)
-                };
+                _logger.LogInformation("User registered successfully with email: {Email}, ID: {UserId}", email, user.Id);
+                return user;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error registering user with email: {Email}", request.Email);
-                return new AuthResponse
-                {
-                    Success = false,
-                    Message = "Registration failed. Please try again."
-                };
+                _logger.LogError(ex, "Error registering user with email: {Email}", email);
+                return null;
             }
         }
 
-        public async Task<AuthResponse> RegisterWithPhoneAsync(RegisterPhoneRequest request)
+        public async Task<bool> RegisterWithPhoneAsync(string phoneNumber)
         {
             try
             {
-                // Check if user already exists
-                var existingUser = await _context.Users
-                    .FirstOrDefaultAsync(u => u.PhoneNumber == request.PhoneNumber);
-
-                if (existingUser != null)
+                // Check if phone is already in use
+                if (await IsPhoneInUseAsync(phoneNumber))
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "User with this phone number already exists"
-                    };
+                    _logger.LogWarning("Registration attempted with existing phone: {PhoneNumber}", phoneNumber);
+                    return false;
                 }
 
-                // Generate OTP for registration
-                var otpResult = await _otpService.GenerateOtpAsync(request.PhoneNumber);
+                // Create user (will be activated after OTP verification)
+                var user = new User
+                {
+                    PhoneNumber = phoneNumber,
+                    IsPhoneVerified = false,
+                    IsActive = false, // Will be activated after OTP verification
+                    CreatedAt = DateTime.UtcNow
+                };
 
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+
+                // Send OTP
+                var otpResult = await _otpService.SendOtpAsync(phoneNumber);
                 if (!otpResult.Success)
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = otpResult.Message
-                    };
+                    // Remove user if OTP sending failed
+                    _context.Users.Remove(user);
+                    await _context.SaveChangesAsync();
+                    return false;
                 }
 
-                return new AuthResponse
-                {
-                    Success = true,
-                    Message = "OTP sent to your phone number. Please verify to complete registration."
-                };
+                _logger.LogInformation("User registration initiated with phone: {PhoneNumber}, ID: {UserId}", phoneNumber, user.Id);
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error registering user with phone: {PhoneNumber}", request.PhoneNumber);
-                return new AuthResponse
-                {
-                    Success = false,
-                    Message = "Registration failed. Please try again."
-                };
+                _logger.LogError(ex, "Error registering user with phone: {PhoneNumber}", phoneNumber);
+                return false;
             }
         }
 
-        public async Task<AuthResponse> LoginWithEmailAsync(LoginEmailRequest request)
+        public async Task<User?> AuthenticateWithEmailAsync(string email, string password)
         {
             try
             {
                 var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Email == request.Email && u.IsActive);
+                    .FirstOrDefaultAsync(u => u.Email == email && u.IsActive);
 
-                if (user == null || string.IsNullOrEmpty(user.PasswordHash))
+                if (user == null)
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "Invalid email or password"
-                    };
+                    _logger.LogWarning("Authentication failed: User not found for email: {Email}", email);
+                    return null;
                 }
 
-                if (!_passwordService.VerifyPassword(request.Password, user.PasswordHash))
+                if (string.IsNullOrEmpty(user.PasswordHash))
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "Invalid email or password"
-                    };
+                    _logger.LogWarning("Authentication failed: No password set for user: {Email}", email);
+                    return null;
+                }
+
+                if (!_passwordService.VerifyPassword(password, user.PasswordHash))
+                {
+                    _logger.LogWarning("Authentication failed: Invalid password for user: {Email}", email);
+                    return null;
                 }
 
                 // Update last login
-                user.LastLoginAt = DateTime.UtcNow;
-                await _context.SaveChangesAsync();
+                await UpdateLastLoginAsync(user.Id);
 
-                // Generate token
-                var token = _tokenService.GenerateJwtToken(user.Id, user.Email!);
-
-                return new AuthResponse
-                {
-                    Success = true,
-                    Message = "Login successful",
-                    Token = token,
-                    User = MapToUserInfo(user)
-                };
+                _logger.LogInformation("User authenticated successfully with email: {Email}, ID: {UserId}", email, user.Id);
+                return user;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error logging in user with email: {Email}", request.Email);
-                return new AuthResponse
-                {
-                    Success = false,
-                    Message = "Login failed. Please try again."
-                };
+                _logger.LogError(ex, "Error authenticating user with email: {Email}", email);
+                return null;
             }
         }
 
-        public async Task<AuthResponse> LoginWithPhoneAsync(LoginPhoneRequest request)
+        public async Task<bool> InitiatePhoneLoginAsync(string phoneNumber)
         {
             try
             {
                 var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.PhoneNumber == request.PhoneNumber && u.IsActive);
+                    .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber && u.IsActive);
 
                 if (user == null)
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "No account found with this phone number"
-                    };
+                    _logger.LogWarning("Phone login failed: User not found for phone: {PhoneNumber}", phoneNumber);
+                    return false;
                 }
 
-                // Generate OTP for login
-                var otpResult = await _otpService.GenerateOtpAsync(request.PhoneNumber);
-
+                // Send OTP
+                var otpResult = await _otpService.SendOtpAsync(phoneNumber);
                 if (!otpResult.Success)
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = otpResult.Message
-                    };
+                    _logger.LogWarning("Phone login failed: Could not send OTP to: {PhoneNumber}", phoneNumber);
+                    return false;
                 }
 
-                return new AuthResponse
-                {
-                    Success = true,
-                    Message = "OTP sent to your phone number. Please verify to complete login."
-                };
+                _logger.LogInformation("Phone login initiated for: {PhoneNumber}, ID: {UserId}", phoneNumber, user.Id);
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error logging in user with phone: {PhoneNumber}", request.PhoneNumber);
-                return new AuthResponse
-                {
-                    Success = false,
-                    Message = "Login failed. Please try again."
-                };
+                _logger.LogError(ex, "Error initiating phone login: {PhoneNumber}", phoneNumber);
+                return false;
             }
         }
 
-        public async Task<AuthResponse> VerifyOtpAndLoginAsync(VerifyOtpRequest request)
+        public async Task<User?> VerifyOtpAsync(string phoneNumber, string otpCode)
         {
             try
             {
-                var isValidOtp = await _otpService.ValidateOtpAsync(request.PhoneNumber, request.OtpCode);
-
-                if (!isValidOtp)
+                // Verify OTP first
+                var isOtpValid = await _otpService.VerifyOtpAsync(phoneNumber, otpCode);
+                if (!isOtpValid)
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "Invalid or expired OTP"
-                    };
+                    _logger.LogWarning("OTP verification failed for phone: {PhoneNumber}", phoneNumber);
+                    return null;
                 }
 
+                // Get or create user
                 var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.PhoneNumber == request.PhoneNumber && u.IsActive);
+                    .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber);
 
                 if (user == null)
                 {
-                    return new AuthResponse
-                    {
-                        Success = false,
-                        Message = "User not found"
-                    };
+                    _logger.LogError("User not found after OTP verification for phone: {PhoneNumber}", phoneNumber);
+                    return null;
                 }
 
-                // Generate token
-                var token = _tokenService.GenerateJwtToken(user.Id, user.PhoneNumber);
-
-                return new AuthResponse
+                // Activate user and verify phone if not already done
+                if (!user.IsActive || !user.IsPhoneVerified)
                 {
-                    Success = true,
-                    Message = "Login successful",
-                    Token = token,
-                    User = MapToUserInfo(user)
-                };
+                    user.IsActive = true;
+                    user.IsPhoneVerified = true;
+                    await _context.SaveChangesAsync();
+                }
+
+                // Update last login
+                await UpdateLastLoginAsync(user.Id);
+
+                _logger.LogInformation("OTP verified successfully for phone: {PhoneNumber}, ID: {UserId}", phoneNumber, user.Id);
+                return user;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error verifying OTP for phone: {PhoneNumber}", request.PhoneNumber);
-                return new AuthResponse
-                {
-                    Success = false,
-                    Message = "OTP verification failed. Please try again."
-                };
+                _logger.LogError(ex, "Error verifying OTP for phone: {PhoneNumber}", phoneNumber);
+                return null;
             }
         }
 
-        public async Task<UserInfo?> GetUserByIdAsync(int userId)
+        public async Task<User?> GetUserByIdAsync(int userId)
         {
             try
             {
-                var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
-
-                return user != null ? MapToUserInfo(user) : null;
+                return await _context.Users
+                    .FirstOrDefaultAsync(u => u.Id == userId);
             }
             catch (Exception ex)
             {
@@ -286,16 +234,205 @@ namespace AuthService.Services
             }
         }
 
-        private UserInfo MapToUserInfo(User user)
+        public async Task<User?> GetUserByEmailAsync(string email)
         {
-            return new UserInfo
+            try
             {
-                Id = user.Id,
-                Email = user.Email,
-                PhoneNumber = user.PhoneNumber,
-                IsEmailVerified = user.IsEmailVerified,
-                IsPhoneVerified = user.IsPhoneVerified
-            };
+                return await _context.Users
+                    .FirstOrDefaultAsync(u => u.Email == email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user by email: {Email}", email);
+                return null;
+            }
+        }
+
+        public async Task<User?> GetUserByPhoneAsync(string phoneNumber)
+        {
+            try
+            {
+                return await _context.Users
+                    .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user by phone: {PhoneNumber}", phoneNumber);
+                return null;
+            }
+        }
+
+        public async Task<UserInfo?> GetUserInfoAsync(int userId)
+        {
+            try
+            {
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Id == userId);
+
+                if (user == null)
+                {
+                    return null;
+                }
+
+                return new UserInfo
+                {
+                    Id = user.Id,
+                    Email = user.Email,
+                    PhoneNumber = user.PhoneNumber,
+                    IsEmailVerified = user.IsEmailVerified,
+                    IsPhoneVerified = user.IsPhoneVerified,
+                    CreatedAt = user.CreatedAt,
+                    LastLoginAt = user.LastLoginAt,
+                    IsActive = user.IsActive
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user info: {UserId}", userId);
+                return null;
+            }
+        }
+
+        public async Task<bool> UpdateLastLoginAsync(int userId)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return false;
+                }
+
+                user.LastLoginAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating last login for user: {UserId}", userId);
+                return false;
+            }
+        }
+
+        public async Task<bool> UpdateEmailVerificationAsync(int userId, bool isVerified)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return false;
+                }
+
+                user.IsEmailVerified = isVerified;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Email verification updated for user {UserId}: {IsVerified}", userId, isVerified);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating email verification for user: {UserId}", userId);
+                return false;
+            }
+        }
+
+        public async Task<bool> UpdatePhoneVerificationAsync(int userId, bool isVerified)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return false;
+                }
+
+                user.IsPhoneVerified = isVerified;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Phone verification updated for user {UserId}: {IsVerified}", userId, isVerified);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating phone verification for user: {UserId}", userId);
+                return false;
+            }
+        }
+
+        public async Task<bool> DeactivateUserAsync(int userId)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return false;
+                }
+
+                user.IsActive = false;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("User deactivated: {UserId}", userId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deactivating user: {UserId}", userId);
+                return false;
+            }
+        }
+
+        public async Task<bool> ActivateUserAsync(int userId)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return false;
+                }
+
+                user.IsActive = true;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("User activated: {UserId}", userId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error activating user: {UserId}", userId);
+                return false;
+            }
+        }
+
+        public async Task<bool> IsEmailInUseAsync(string email)
+        {
+            try
+            {
+                return await _context.Users
+                    .AnyAsync(u => u.Email == email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking if email is in use: {Email}", email);
+                return true; // Return true to be safe and prevent registration
+            }
+        }
+
+        public async Task<bool> IsPhoneInUseAsync(string phoneNumber)
+        {
+            try
+            {
+                return await _context.Users
+                    .AnyAsync(u => u.PhoneNumber == phoneNumber);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking if phone is in use: {PhoneNumber}", phoneNumber);
+                return true; // Return true to be safe and prevent registration
+            }
         }
     }
 }
