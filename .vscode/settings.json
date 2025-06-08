@@ -1,7 +1,6 @@
 {
   "dotnet.defaultSolution": "AuthService.csproj",
   "omnisharp.enableEditorConfigSupport": true,
-  "omnisharp.enableImportCompletion": true,
   "omnisharp.enableRoslynAnalyzers": true,
   "files.exclude": {
     "**/bin": true,
@@ -11,5 +10,6 @@
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
     "source.organizeImports": "explicit"
-  }
+  },
+  "dotnet.completion.showCompletionItemsFromUnimportedNamespaces": true
 }

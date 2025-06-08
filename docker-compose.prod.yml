@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports: []  # Don't expose ports in production
+    
+  pgadmin:
+    profiles:
+      - admin  # Only start with --profile admin
+    
+  redis:
+    ports: []  # Don't expose ports in production
+    
+  authservice:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=https://+:443
+    ports:
+      - "443:443"
+    volumes:
+      - /etc/ssl/certs:/https:ro  # Production certificates

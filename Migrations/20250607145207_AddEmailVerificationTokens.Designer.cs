@@ -3,6 +3,7 @@ using System;
 using AuthService.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AuthService.Migrations
 {
     [DbContext(typeof(AuthDbContext))]
-    partial class AuthDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250607145207_AddEmailVerificationTokens")]
+    partial class AddEmailVerificationTokens
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -204,10 +207,6 @@ namespace AuthService.Migrations
                     b.Property<bool>("IsPhoneVerified")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("KeycloakId")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
                     b.Property<DateTime?>("LastLoginAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -225,60 +224,11 @@ namespace AuthService.Migrations
                         .IsUnique()
                         .HasFilter("\"Email\" IS NOT NULL");
 
-                    b.HasIndex("KeycloakId")
-                        .IsUnique()
-                        .HasFilter("\"KeycloakId\" IS NOT NULL");
-
                     b.HasIndex("PhoneNumber")
                         .IsUnique()
                         .HasFilter("\"PhoneNumber\" IS NOT NULL");
 
                     b.ToTable("Users");
-                });
-
-            modelBuilder.Entity("AuthService.Models.UserRoleAssignment", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("AssignedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("AssignedByUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("RevokedByUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Role")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AssignedAt")
-                        .HasDatabaseName("IX_UserRoleAssignments_AssignedAt");
-
-                    b.HasIndex("AssignedByUserId");
-
-                    b.HasIndex("RevokedByUserId");
-
-                    b.HasIndex("UserId", "Role", "RevokedAt")
-                        .HasDatabaseName("IX_UserRoleAssignments_UserId_Role_RevokedAt");
-
-                    b.ToTable("UserRoleAssignments");
                 });
 
             modelBuilder.Entity("AuthService.Models.EmailVerificationToken", b =>
@@ -314,31 +264,6 @@ namespace AuthService.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("AuthService.Models.UserRoleAssignment", b =>
-                {
-                    b.HasOne("AuthService.Models.User", "AssignedByUser")
-                        .WithMany()
-                        .HasForeignKey("AssignedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("AuthService.Models.User", "RevokedByUser")
-                        .WithMany()
-                        .HasForeignKey("RevokedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("AuthService.Models.User", "User")
-                        .WithMany("RoleAssignments")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AssignedByUser");
-
-                    b.Navigation("RevokedByUser");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("AuthService.Models.User", b =>
                 {
                     b.Navigation("EmailVerificationTokens");
@@ -346,8 +271,6 @@ namespace AuthService.Migrations
                     b.Navigation("OtpTokens");
 
                     b.Navigation("RefreshTokens");
-
-                    b.Navigation("RoleAssignments");
                 });
 #pragma warning restore 612, 618
         }
