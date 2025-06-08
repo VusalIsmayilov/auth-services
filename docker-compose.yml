@@ -31,8 +31,9 @@ services:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@authservice.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
       PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "${PGADMIN_PORT:-8080}:80"
+    # Remove direct port exposure - access through Nginx
+    expose:
+      - "80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./scripts/servers.json:/pgadmin4/servers.json:ro
@@ -63,6 +64,7 @@ services:
   
   keycloak:
     image: quay.io/keycloak/keycloak:21.1.1
+    container_name: authservice_keycloak
     environment:
       # default admin user
       KEYCLOAK_ADMIN: admin
@@ -76,13 +78,17 @@ services:
         "start-dev",
         "--hostname-strict=false"
       ]
-    ports:
-      - "8081:8080"
+    # Remove direct port exposure - access through Nginx
+    expose:
+      - "8080"
+    networks:
+      - authservice_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   # Authentication Service Application (Development)
   authservice:
@@ -92,19 +98,16 @@ services:
     container_name: authservice_app
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
-      - ASPNETCORE_URLS=https://+:443;http://+:80
-      - ASPNETCORE_Kestrel__Certificates__Default__Password=${CERT_PASSWORD:-dev_cert_password}
-      - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/aspnetapp.pfx
+      - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=${POSTGRES_DB:-authservice_db};Username=${POSTGRES_USER:-authservice_user};Password=${POSTGRES_PASSWORD:-authservice_strong_password_123}
       - JWT__SecretKey=${JWT_SECRET_KEY:-YourVeryStrongSecretKeyThatIsAtLeast32CharactersLong!}
       - JWT__Issuer=${JWT_ISSUER:-AuthService}
       - JWT__Audience=${JWT_AUDIENCE:-AuthService}
       - Redis__ConnectionString=redis:6379,password=${REDIS_PASSWORD:-redis_password_123}
-    ports:
-      - "${AUTH_HTTP_PORT:-5000}:80"
-      - "${AUTH_HTTPS_PORT:-5001}:443"
+    # Remove direct port exposure - access through Nginx
+    expose:
+      - "80"
     volumes:
-      - ~/.aspnet/https:/https:ro
       - app_data:/app/data
     networks:
       - authservice_network
@@ -120,6 +123,28 @@ services:
       timeout: 10s
       retries: 3
 
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: authservice_nginx
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_KEYCLOAK_PORT:-8081}:8081"
+      - "${NGINX_PGADMIN_PORT:-8080}:8080"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - authservice_network
+    depends_on:
+      - keycloak
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
 volumes:
   postgres_data:
     driver: local
@@ -128,6 +153,8 @@ volumes:
   redis_data:
     driver: local
   app_data:
+    driver: local
+  nginx_logs:
     driver: local
 
 networks:
