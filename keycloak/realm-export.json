@@ -1,0 +1,68 @@
+{
+  "realm": "authservice",
+  "displayName": "AuthService Realm",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "authservice-client",
+      "name": "AuthService API Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "authservice-client-secret",
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "900",
+        "refresh.token.lifespan": "604800"
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "Admin",
+        "description": "Administrator role with full access"
+      },
+      {
+        "name": "User1",
+        "description": "User Type 1 with specific permissions"
+      },
+      {
+        "name": "User2",
+        "description": "User Type 2 with different permissions"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin@authservice.com",
+      "email": "admin@authservice.com",
+      "firstName": "System",
+      "lastName": "Administrator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["Admin"]
+    }
+  ]
+}

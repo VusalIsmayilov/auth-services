@@ -84,5 +84,15 @@ namespace AuthService.Services.Interfaces
         /// Checks if phone number is already in use
         /// </summary>
         Task<bool> IsPhoneInUseAsync(string phoneNumber);
+
+        /// <summary>
+        /// Gets all users
+        /// </summary>
+        Task<List<User>> GetAllUsersAsync();
+
+        /// <summary>
+        /// Gets count of active users
+        /// </summary>
+        Task<int> GetActiveUserCountAsync();
     }
 }

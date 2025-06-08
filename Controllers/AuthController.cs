@@ -13,17 +13,20 @@ namespace AuthService.Controllers
         private readonly IUserService _userService;
         private readonly ITokenService _tokenService;
         private readonly IOtpService _otpService;
+        private readonly IEmailVerificationService _emailVerificationService;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
             IUserService userService,
             ITokenService tokenService,
             IOtpService otpService,
+            IEmailVerificationService emailVerificationService,
             ILogger<AuthController> logger)
         {
             _userService = userService;
             _tokenService = tokenService;
             _otpService = otpService;
+            _emailVerificationService = emailVerificationService;
             _logger = logger;
         }
 
@@ -443,6 +446,123 @@ namespace AuthService.Controllers
                 {
                     Success = false,
                     Message = "An error occurred while retrieving user information"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Verify email address using verification token
+        /// </summary>
+        [HttpGet("verify-email")]
+        public async Task<ActionResult<ApiResponse>> VerifyEmail([FromQuery] string token)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(token))
+                {
+                    return BadRequest(new ApiResponse
+                    {
+                        Success = false,
+                        Message = "Verification token is required"
+                    });
+                }
+
+                var isVerified = await _emailVerificationService.VerifyEmailAsync(token);
+                if (isVerified)
+                {
+                    _logger.LogInformation("Email verification successful for token: {Token}", token);
+                    return Ok(new ApiResponse
+                    {
+                        Success = true,
+                        Message = "Email verified successfully"
+                    });
+                }
+
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Invalid or expired verification token"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during email verification");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred during email verification"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Verify email address using verification token (POST method)
+        /// </summary>
+        [HttpPost("verify-email")]
+        public async Task<ActionResult<ApiResponse>> VerifyEmailPost([FromBody] VerifyEmailRequest request)
+        {
+            try
+            {
+                var isVerified = await _emailVerificationService.VerifyEmailAsync(request.Token);
+                if (isVerified)
+                {
+                    _logger.LogInformation("Email verification successful for token: {Token}", request.Token);
+                    return Ok(new ApiResponse
+                    {
+                        Success = true,
+                        Message = "Email verified successfully"
+                    });
+                }
+
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Invalid or expired verification token"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during email verification");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred during email verification"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Resend email verification for unverified email addresses
+        /// </summary>
+        [HttpPost("resend-verification")]
+        public async Task<ActionResult<ApiResponse>> ResendVerificationEmail([FromBody] ResendVerificationRequest request)
+        {
+            try
+            {
+                var result = await _emailVerificationService.ResendVerificationEmailAsync(request.Email);
+                if (result)
+                {
+                    _logger.LogInformation("Verification email resent successfully to: {Email}", request.Email);
+                    return Ok(new ApiResponse
+                    {
+                        Success = true,
+                        Message = "Verification email sent successfully"
+                    });
+                }
+
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Unable to send verification email. Email may already be verified or not found."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error resending verification email");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while sending verification email"
                 });
             }
         }

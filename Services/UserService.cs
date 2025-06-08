@@ -11,17 +11,23 @@ namespace AuthService.Services
         private readonly AuthDbContext _context;
         private readonly IPasswordService _passwordService;
         private readonly IOtpService _otpService;
+        private readonly IEmailVerificationService _emailVerificationService;
+        private readonly IEmailService _emailService;
         private readonly ILogger<UserService> _logger;
 
         public UserService(
             AuthDbContext context,
             IPasswordService passwordService,
             IOtpService otpService,
+            IEmailVerificationService emailVerificationService,
+            IEmailService emailService,
             ILogger<UserService> logger)
         {
             _context = context;
             _passwordService = passwordService;
             _otpService = otpService;
+            _emailVerificationService = emailVerificationService;
+            _emailService = emailService;
             _logger = logger;
         }
 
@@ -44,7 +50,7 @@ namespace AuthService.Services
                 {
                     Email = email,
                     PasswordHash = passwordHash,
-                    IsEmailVerified = true, // Auto-verify for email registration
+                    IsEmailVerified = false, // Email verification required
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -52,8 +58,25 @@ namespace AuthService.Services
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();
 
-                // Update last login
-                await UpdateLastLoginAsync(user.Id);
+                // Generate and send verification email
+                try
+                {
+                    var verificationToken = await _emailVerificationService.GenerateVerificationTokenAsync(user.Id, email);
+                    var emailSent = await _emailService.SendVerificationEmailAsync(email, verificationToken, email);
+                    
+                    if (emailSent)
+                    {
+                        _logger.LogInformation("Verification email sent successfully to: {Email}", email);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to send verification email to: {Email}", email);
+                    }
+                }
+                catch (Exception emailEx)
+                {
+                    _logger.LogError(emailEx, "Error sending verification email to: {Email}", email);
+                }
 
                 _logger.LogInformation("User registered successfully with email: {Email}, ID: {UserId}", email, user.Id);
                 return user;
@@ -432,6 +455,35 @@ namespace AuthService.Services
             {
                 _logger.LogError(ex, "Error checking if phone is in use: {PhoneNumber}", phoneNumber);
                 return true; // Return true to be safe and prevent registration
+            }
+        }
+
+        public async Task<List<User>> GetAllUsersAsync()
+        {
+            try
+            {
+                return await _context.Users
+                    .OrderByDescending(u => u.CreatedAt)
+                    .ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting all users");
+                return new List<User>();
+            }
+        }
+
+        public async Task<int> GetActiveUserCountAsync()
+        {
+            try
+            {
+                return await _context.Users
+                    .CountAsync(u => u.IsActive);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting active user count");
+                return 0;
             }
         }
     }
