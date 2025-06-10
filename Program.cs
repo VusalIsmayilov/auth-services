@@ -173,12 +173,14 @@ builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 builder.Services.AddScoped<IRoleService, RoleService>();
 
 // Background Services
 builder.Services.AddHostedService<OtpCleanupService>();
 builder.Services.AddHostedService<RefreshTokenCleanupService>();
 builder.Services.AddHostedService<EmailVerificationCleanupService>();
+builder.Services.AddHostedService<PasswordResetCleanupService>();
 
 // Logging Configuration
 builder.Logging.ClearProviders();
@@ -274,6 +276,7 @@ app.MapGet("/", () => new
         "Email + Password Authentication",
         "Phone + OTP Authentication",
         "Email Verification System",
+        "Password Reset System",
         "Role-Based Access Control (Admin, User1, User2)",
         "Keycloak Integration Support",
         "JWT Access Tokens (15 min)",

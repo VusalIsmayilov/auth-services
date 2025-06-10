@@ -21,11 +21,13 @@ public class EmailSettings
 public class EmailService : IEmailService
 {
     private readonly EmailSettings _emailSettings;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<EmailService> _logger;
 
-    public EmailService(IOptions<EmailSettings> emailSettings, ILogger<EmailService> logger)
+    public EmailService(IOptions<EmailSettings> emailSettings, IConfiguration configuration, ILogger<EmailService> logger)
     {
         _emailSettings = emailSettings.Value;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -55,7 +57,8 @@ public class EmailService : IEmailService
         try
         {
             var subject = "Reset Your Password";
-            var resetUrl = $"{_emailSettings.BaseUrl}/reset-password?token={token}";
+            var frontendBaseUrl = _configuration["Frontend:BaseUrl"] ?? _emailSettings.BaseUrl;
+            var resetUrl = $"{frontendBaseUrl}/reset-password?token={token}";
             
             var body = GetPasswordResetEmailTemplate(userName.IsNullOrEmpty() ? email : userName, resetUrl);
             
@@ -182,7 +185,7 @@ public class EmailService : IEmailService
         <p>If the button doesn't work, you can also copy and paste the following link into your browser:</p>
         <p style='word-break: break-all; color: #666;'>{resetUrl}</p>
         
-        <p><strong>This reset link will expire in 1 hour.</strong></p>
+        <p><strong>This reset link will expire in 24 hours.</strong></p>
         
         <p>If you didn't request a password reset, please ignore this email. Your password will remain unchanged.</p>
         

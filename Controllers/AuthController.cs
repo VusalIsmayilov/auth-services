@@ -14,6 +14,7 @@ namespace AuthService.Controllers
         private readonly ITokenService _tokenService;
         private readonly IOtpService _otpService;
         private readonly IEmailVerificationService _emailVerificationService;
+        private readonly IPasswordResetService _passwordResetService;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
@@ -21,12 +22,14 @@ namespace AuthService.Controllers
             ITokenService tokenService,
             IOtpService otpService,
             IEmailVerificationService emailVerificationService,
+            IPasswordResetService passwordResetService,
             ILogger<AuthController> logger)
         {
             _userService = userService;
             _tokenService = tokenService;
             _otpService = otpService;
             _emailVerificationService = emailVerificationService;
+            _passwordResetService = passwordResetService;
             _logger = logger;
         }
 
@@ -563,6 +566,118 @@ namespace AuthService.Controllers
                 {
                     Success = false,
                     Message = "An error occurred while sending verification email"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Request password reset email
+        /// </summary>
+        [HttpPost("forgot-password")]
+        public async Task<ActionResult<ApiResponse>> ForgotPassword([FromBody] ForgotPasswordRequest request)
+        {
+            try
+            {
+                var ipAddress = GetClientIpAddress();
+                var userAgent = GetDeviceInfo();
+                var result = await _passwordResetService.SendPasswordResetEmailAsync(request.Email, ipAddress, userAgent);
+
+                if (result)
+                {
+                    _logger.LogInformation("Password reset email sent successfully to: {Email}", request.Email);
+                    return Ok(new ApiResponse
+                    {
+                        Success = true,
+                        Message = "If an account with that email exists, a password reset link has been sent."
+                    });
+                }
+
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Unable to send password reset email. Please try again later."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending password reset email");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while processing your request"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Validate password reset token
+        /// </summary>
+        [HttpPost("validate-reset-token")]
+        public async Task<ActionResult<ApiResponse>> ValidateResetToken([FromBody] ValidateResetTokenRequest request)
+        {
+            try
+            {
+                var isValid = await _passwordResetService.ValidateResetTokenAsync(request.Token);
+
+                if (isValid)
+                {
+                    return Ok(new ApiResponse
+                    {
+                        Success = true,
+                        Message = "Token is valid"
+                    });
+                }
+
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Invalid or expired reset token"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating reset token");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while validating the token"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Reset password using token
+        /// </summary>
+        [HttpPost("reset-password")]
+        public async Task<ActionResult<ApiResponse>> ResetPassword([FromBody] ResetPasswordRequest request)
+        {
+            try
+            {
+                var result = await _passwordResetService.ResetPasswordAsync(request.Token, request.NewPassword);
+
+                if (result)
+                {
+                    _logger.LogInformation("Password reset successfully for token: {Token}", request.Token);
+                    return Ok(new ApiResponse
+                    {
+                        Success = true,
+                        Message = "Password has been reset successfully"
+                    });
+                }
+
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Invalid or expired reset token"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error resetting password");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while resetting your password"
                 });
             }
         }

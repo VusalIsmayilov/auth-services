@@ -11,6 +11,7 @@ namespace AuthService.Data
         public DbSet<OtpToken> OtpTokens { get; set; } = null!;
         public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
         public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; } = null!;
+        public DbSet<PasswordResetToken> PasswordResetTokens { get; set; } = null!;
         public DbSet<UserRoleAssignment> UserRoleAssignments { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -129,6 +130,38 @@ namespace AuthService.Data
 
                 entity.HasOne(e => e.User)
                     .WithMany(u => u.EmailVerificationTokens)
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // PasswordResetToken entity configuration
+            modelBuilder.Entity<PasswordResetToken>(entity =>
+            {
+                entity.HasIndex(e => e.Token)
+                    .IsUnique()
+                    .HasDatabaseName("IX_PasswordResetTokens_Token");
+
+                entity.HasIndex(e => e.UserId)
+                    .HasDatabaseName("IX_PasswordResetTokens_UserId");
+
+                entity.HasIndex(e => e.ExpiresAt)
+                    .HasDatabaseName("IX_PasswordResetTokens_ExpiresAt");
+
+                entity.HasIndex(e => new { e.UserId, e.IsUsed, e.ExpiresAt })
+                    .HasDatabaseName("IX_PasswordResetTokens_UserId_IsUsed_ExpiresAt");
+
+                entity.Property(e => e.Token)
+                    .HasMaxLength(255)
+                    .IsRequired();
+
+                entity.Property(e => e.IpAddress)
+                    .HasMaxLength(45);
+
+                entity.Property(e => e.UserAgent)
+                    .HasMaxLength(500);
+
+                entity.HasOne(e => e.User)
+                    .WithMany(u => u.PasswordResetTokens)
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
