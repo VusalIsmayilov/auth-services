@@ -3,11 +3,15 @@ using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Mail;
 using System.Text;
+using SendGrid;
+using SendGrid.Helpers.Mail;
 
 namespace AuthService.Services;
 
 public class EmailSettings
 {
+    public string Provider { get; set; } = "SMTP"; // "SMTP" or "SendGrid"
+    public string SendGridApiKey { get; set; } = string.Empty;
     public string SmtpHost { get; set; } = string.Empty;
     public int SmtpPort { get; set; }
     public string SmtpUsername { get; set; } = string.Empty;
@@ -95,27 +99,93 @@ public class EmailService : IEmailService
 
     private async Task SendEmailAsync(string toEmail, string subject, string body)
     {
-        // If SMTP is not configured, simulate email sending (for development)
-        if (string.IsNullOrEmpty(_emailSettings.SmtpHost))
+        switch (_emailSettings.Provider.ToUpper())
         {
-            _logger.LogInformation("EMAIL SIMULATION: To: {Email}, Subject: {Subject}", toEmail, subject);
+            case "SENDGRID":
+                await SendEmailViaSendGridAsync(toEmail, subject, body);
+                break;
+            case "SMTP":
+                await SendEmailViaSmtpAsync(toEmail, subject, body);
+                break;
+            default:
+                // If no provider is configured, simulate email sending (for development)
+                _logger.LogInformation("EMAIL SIMULATION: To: {Email}, Subject: {Subject}", toEmail, subject);
+                _logger.LogInformation("EMAIL CONTENT: {Body}", body);
+                break;
+        }
+    }
+
+    private async Task SendEmailViaSendGridAsync(string toEmail, string subject, string body)
+    {
+        if (string.IsNullOrEmpty(_emailSettings.SendGridApiKey))
+        {
+            _logger.LogWarning("SendGrid API key is not configured. Falling back to email simulation.");
+            _logger.LogInformation("EMAIL SIMULATION (SendGrid): To: {Email}, Subject: {Subject}", toEmail, subject);
             _logger.LogInformation("EMAIL CONTENT: {Body}", body);
             return;
         }
 
-        using var client = new SmtpClient(_emailSettings.SmtpHost, _emailSettings.SmtpPort);
-        client.EnableSsl = _emailSettings.EnableSsl;
-        client.UseDefaultCredentials = false;
-        client.Credentials = new NetworkCredential(_emailSettings.SmtpUsername, _emailSettings.SmtpPassword);
+        try
+        {
+            var client = new SendGridClient(_emailSettings.SendGridApiKey);
+            var from = new EmailAddress(_emailSettings.FromEmail, _emailSettings.FromName);
+            var to = new EmailAddress(toEmail);
+            
+            var msg = MailHelper.CreateSingleEmail(from, to, subject, null, body);
+            
+            var response = await client.SendEmailAsync(msg);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Email sent successfully via SendGrid to {Email}", toEmail);
+            }
+            else
+            {
+                var responseBody = await response.Body.ReadAsStringAsync();
+                _logger.LogError("Failed to send email via SendGrid. Status: {StatusCode}, Response: {Response}", 
+                    response.StatusCode, responseBody);
+                throw new Exception($"SendGrid API returned status code: {response.StatusCode}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending email via SendGrid to {Email}", toEmail);
+            throw;
+        }
+    }
 
-        using var message = new MailMessage();
-        message.From = new MailAddress(_emailSettings.FromEmail, _emailSettings.FromName);
-        message.To.Add(toEmail);
-        message.Subject = subject;
-        message.Body = body;
-        message.IsBodyHtml = true;
+    private async Task SendEmailViaSmtpAsync(string toEmail, string subject, string body)
+    {
+        // If SMTP is not configured, simulate email sending (for development)
+        if (string.IsNullOrEmpty(_emailSettings.SmtpHost))
+        {
+            _logger.LogInformation("EMAIL SIMULATION (SMTP): To: {Email}, Subject: {Subject}", toEmail, subject);
+            _logger.LogInformation("EMAIL CONTENT: {Body}", body);
+            return;
+        }
 
-        await client.SendMailAsync(message);
+        try
+        {
+            using var client = new SmtpClient(_emailSettings.SmtpHost, _emailSettings.SmtpPort);
+            client.EnableSsl = _emailSettings.EnableSsl;
+            client.UseDefaultCredentials = false;
+            client.Credentials = new NetworkCredential(_emailSettings.SmtpUsername, _emailSettings.SmtpPassword);
+
+            using var message = new MailMessage();
+            message.From = new MailAddress(_emailSettings.FromEmail, _emailSettings.FromName);
+            message.To.Add(toEmail);
+            message.Subject = subject;
+            message.Body = body;
+            message.IsBodyHtml = true;
+
+            await client.SendMailAsync(message);
+            _logger.LogInformation("Email sent successfully via SMTP to {Email}", toEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending email via SMTP to {Email}", toEmail);
+            throw;
+        }
     }
 
     private static string GetVerificationEmailTemplate(string userName, string verificationUrl)
