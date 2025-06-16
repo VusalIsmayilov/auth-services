@@ -8,6 +8,12 @@ namespace AuthService.Models
         [Key]
         public int Id { get; set; }
 
+        [StringLength(100)]
+        public string? FirstName { get; set; }
+
+        [StringLength(100)]
+        public string? LastName { get; set; }
+
         [EmailAddress]
         [StringLength(255)]
         public string? Email { get; set; }

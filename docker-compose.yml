@@ -63,30 +63,22 @@ services:
     restart: unless-stopped
   
   keycloak:
-    image: quay.io/keycloak/keycloak:21.1.1
+    image: quay.io/keycloak/keycloak:legacy
     container_name: authservice_keycloak
     environment:
-      # default admin user
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      # import a predefined realm on startup (optional)
-      KC_DB: dev-mem
-      KC_HEALTH_ENABLED: "true"
-      KC_METRICS_ENABLED: "true"
-    command:
-      [
-        "start-dev",
-        "--hostname-strict=false"
-      ]
-    # Remove direct port exposure - access through Nginx
-    expose:
-      - "8080"
+      # Legacy Keycloak environment variables
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin
+      DB_VENDOR: H2
+    # Direct port exposure for testing
+    ports:
+      - "8082:8080"
     networks:
       - authservice_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-f", "http://localhost:8080/auth/realms/master"]
+      interval: 30s
+      timeout: 10s
       retries: 5
     restart: unless-stopped
 

@@ -19,9 +19,19 @@ namespace AuthService.DTOs
     // Request DTOs
     public class RegisterEmailRequest
     {
+        [StringLength(100)]
+        public string? FirstName { get; set; }
+
+        [StringLength(100)]
+        public string? LastName { get; set; }
+
         [Required]
         [EmailAddress]
         public string Email { get; set; } = string.Empty;
+
+        [Phone]
+        [StringLength(20)]
+        public string? PhoneNumber { get; set; }
 
         [Required]
         [MinLength(6)]
@@ -118,6 +128,19 @@ namespace AuthService.DTOs
         public string Token { get; set; } = string.Empty;
     }
 
+    public class UpdateProfileRequest
+    {
+        [StringLength(100)]
+        public string? FirstName { get; set; }
+
+        [StringLength(100)]
+        public string? LastName { get; set; }
+
+        [Phone]
+        [StringLength(20)]
+        public string? PhoneNumber { get; set; }
+    }
+
     // Response DTOs
     public class TokenResponse
     {
@@ -139,6 +162,8 @@ namespace AuthService.DTOs
     public class UserResponse
     {
         public int Id { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
         public string? Email { get; set; }
         public string? PhoneNumber { get; set; }
         public bool IsEmailVerified { get; set; }
@@ -223,6 +248,8 @@ namespace AuthService.DTOs
     public class UserWithRoleResponse
     {
         public int Id { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
         public string? Email { get; set; }
         public string? PhoneNumber { get; set; }
         public bool IsEmailVerified { get; set; }

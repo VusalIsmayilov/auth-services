@@ -31,7 +31,7 @@ namespace AuthService.Services
             _logger = logger;
         }
 
-        public async Task<User?> RegisterWithEmailAsync(string email, string password)
+        public async Task<User?> RegisterWithEmailAsync(string email, string password, string? firstName = null, string? lastName = null, string? phoneNumber = null)
         {
             try
             {
@@ -42,13 +42,23 @@ namespace AuthService.Services
                     return null;
                 }
 
+                // Check if phone number is provided and already in use
+                if (!string.IsNullOrEmpty(phoneNumber) && await IsPhoneInUseAsync(phoneNumber))
+                {
+                    _logger.LogWarning("Registration attempted with existing phone: {PhoneNumber}", phoneNumber);
+                    return null;
+                }
+
                 // Hash the password
                 var passwordHash = _passwordService.HashPassword(password);
 
                 // Create new user
                 var user = new User
                 {
+                    FirstName = firstName,
+                    LastName = lastName,
                     Email = email,
+                    PhoneNumber = phoneNumber,
                     PasswordHash = passwordHash,
                     IsEmailVerified = false, // Email verification required
                     IsActive = true,
@@ -253,6 +263,46 @@ namespace AuthService.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting user by ID: {UserId}", userId);
+                return null;
+            }
+        }
+
+        public async Task<User?> UpdateUserProfileAsync(int userId, string? firstName, string? lastName, string? phoneNumber)
+        {
+            try
+            {
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+                if (user == null)
+                {
+                    _logger.LogWarning("User not found for profile update: {UserId}", userId);
+                    return null;
+                }
+
+                // Check if phone number is already in use by another user
+                if (!string.IsNullOrEmpty(phoneNumber) && phoneNumber != user.PhoneNumber)
+                {
+                    var existingUser = await _context.Users
+                        .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber && u.Id != userId);
+                    if (existingUser != null)
+                    {
+                        _logger.LogWarning("Phone number already in use: {PhoneNumber}", phoneNumber);
+                        return null;
+                    }
+                }
+
+                // Update user fields
+                user.FirstName = firstName;
+                user.LastName = lastName;
+                user.PhoneNumber = phoneNumber;
+
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation("User profile updated successfully: {UserId}", userId);
+                return user;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user profile: {UserId}", userId);
                 return null;
             }
         }

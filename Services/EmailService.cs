@@ -40,7 +40,8 @@ public class EmailService : IEmailService
         try
         {
             var subject = "Verify Your Email Address";
-            var verificationUrl = $"{_emailSettings.BaseUrl}/api/auth/verify-email?token={token}";
+            var frontendBaseUrl = _configuration["Frontend:BaseUrl"] ?? _emailSettings.BaseUrl;
+            var verificationUrl = $"{frontendBaseUrl}/email-verification?token={token}";
             
             var body = GetVerificationEmailTemplate(userName.IsNullOrEmpty() ? email : userName, verificationUrl);
             
