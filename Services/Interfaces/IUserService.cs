@@ -8,7 +8,7 @@ namespace AuthService.Services.Interfaces
         /// <summary>
         /// Registers a new user with email and password
         /// </summary>
-        Task<User?> RegisterWithEmailAsync(string email, string password);
+        Task<User?> RegisterWithEmailAsync(string email, string password, string? firstName = null, string? lastName = null, string? phoneNumber = null);
 
         /// <summary>
         /// Registers a new user with phone number and sends OTP
@@ -34,6 +34,11 @@ namespace AuthService.Services.Interfaces
         /// Gets user by ID
         /// </summary>
         Task<User?> GetUserByIdAsync(int userId);
+
+        /// <summary>
+        /// Updates user profile information
+        /// </summary>
+        Task<User?> UpdateUserProfileAsync(int userId, string? firstName, string? lastName, string? phoneNumber);
 
         /// <summary>
         /// Gets user by email

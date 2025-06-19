@@ -41,7 +41,7 @@ namespace AuthService.Controllers
         {
             try
             {
-                var user = await _userService.RegisterWithEmailAsync(request.Email, request.Password);
+                var user = await _userService.RegisterWithEmailAsync(request.Email, request.Password, request.FirstName, request.LastName, request.PhoneNumber);
                 if (user == null)
                 {
                     return BadRequest(new AuthResponse
@@ -63,6 +63,8 @@ namespace AuthService.Controllers
                     User = new UserResponse
                     {
                         Id = user.Id,
+                        FirstName = user.FirstName,
+                        LastName = user.LastName,
                         Email = user.Email,
                         PhoneNumber = user.PhoneNumber,
                         IsEmailVerified = user.IsEmailVerified,
@@ -150,6 +152,8 @@ namespace AuthService.Controllers
                     User = new UserResponse
                     {
                         Id = user.Id,
+                        FirstName = user.FirstName,
+                        LastName = user.LastName,
                         Email = user.Email,
                         PhoneNumber = user.PhoneNumber,
                         IsEmailVerified = user.IsEmailVerified,
@@ -237,6 +241,8 @@ namespace AuthService.Controllers
                     User = new UserResponse
                     {
                         Id = user.Id,
+                        FirstName = user.FirstName,
+                        LastName = user.LastName,
                         Email = user.Email,
                         PhoneNumber = user.PhoneNumber,
                         IsEmailVerified = user.IsEmailVerified,
@@ -436,6 +442,8 @@ namespace AuthService.Controllers
                 return Ok(new UserResponse
                 {
                     Id = user.Id,
+                    FirstName = user.FirstName,
+                    LastName = user.LastName,
                     Email = user.Email,
                     PhoneNumber = user.PhoneNumber,
                     IsEmailVerified = user.IsEmailVerified,
@@ -449,6 +457,49 @@ namespace AuthService.Controllers
                 {
                     Success = false,
                     Message = "An error occurred while retrieving user information"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Update current authenticated user information
+        /// </summary>
+        [HttpPut("me")]
+        [Authorize]
+        public async Task<ActionResult<UserResponse>> UpdateCurrentUser([FromBody] UpdateProfileRequest request)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
+                {
+                    return Unauthorized();
+                }
+
+                var updatedUser = await _userService.UpdateUserProfileAsync(userId, request.FirstName, request.LastName, request.PhoneNumber);
+                if (updatedUser == null)
+                {
+                    return NotFound();
+                }
+
+                return Ok(new UserResponse
+                {
+                    Id = updatedUser.Id,
+                    FirstName = updatedUser.FirstName,
+                    LastName = updatedUser.LastName,
+                    Email = updatedUser.Email,
+                    PhoneNumber = updatedUser.PhoneNumber,
+                    IsEmailVerified = updatedUser.IsEmailVerified,
+                    IsPhoneVerified = updatedUser.IsPhoneVerified
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating current user");
+                return StatusCode(500, new ApiResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while updating user information"
                 });
             }
         }
