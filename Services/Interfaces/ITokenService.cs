@@ -58,5 +58,11 @@ namespace AuthService.Services.Interfaces
         /// <param name="refreshToken">The refresh token to validate</param>
         /// <returns>RefreshToken entity if valid, null otherwise</returns>
         Task<RefreshToken?> ValidateRefreshTokenAsync(string refreshToken);
+
+        /// <summary>
+        /// Gets the JSON Web Key Set (JWKS) for token verification
+        /// </summary>
+        /// <returns>JWKS JSON object</returns>
+        object GetJwks();
     }
 }

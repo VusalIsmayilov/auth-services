@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using AuthService.DTOs;
 using AuthService.Models.Enums;
 using AuthService.Services.Interfaces;
@@ -9,22 +10,26 @@ namespace AuthService.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = "PlatformAdmin")]
 public class AdminController : ControllerBase
 {
     private readonly IUserService _userService;
     private readonly IRoleService _roleService;
     private readonly IPasswordService _passwordService;
+    private readonly IKeycloakService _keycloakService;
     private readonly ILogger<AdminController> _logger;
 
     public AdminController(
         IUserService userService,
         IRoleService roleService,
         IPasswordService passwordService,
+        IKeycloakService keycloakService,
         ILogger<AdminController> logger)
     {
         _userService = userService;
         _roleService = roleService;
         _passwordService = passwordService;
+        _keycloakService = keycloakService;
         _logger = logger;
     }
 
@@ -32,18 +37,19 @@ public class AdminController : ControllerBase
     /// Bootstrap: Create initial admin user (only works if no admin exists)
     /// </summary>
     [HttpPost("bootstrap")]
+    [AllowAnonymous]
     public async Task<ActionResult<ApiResponse>> BootstrapAdmin([FromBody] RegisterEmailRequest request)
     {
         try
         {
-            // Check if any admin user already exists
-            var existingAdmins = await _roleService.GetUsersByRoleAsync(UserRole.Admin);
+            // Check if any platform admin user already exists
+            var existingAdmins = await _roleService.GetUsersByRoleAsync(UserRole.PlatformAdmin);
             if (existingAdmins.Any())
             {
                 return BadRequest(new ApiResponse
                 {
                     Success = false,
-                    Message = "Admin user already exists. Bootstrap not allowed."
+                    Message = "Platform admin user already exists. Bootstrap not allowed."
                 });
             }
 
@@ -68,12 +74,12 @@ public class AdminController : ControllerBase
                 });
             }
 
-            // Assign admin role (use user ID 1 as bootstrap admin)
+            // Assign platform admin role (use user ID 1 as bootstrap admin)
             var roleAssigned = await _roleService.AssignRoleAsync(
                 user.Id, 
-                UserRole.Admin, 
+                UserRole.PlatformAdmin, 
                 user.Id, // Self-assigned during bootstrap
-                "Bootstrap admin user");
+                "Bootstrap platform admin user");
 
             if (!roleAssigned)
             {
@@ -113,16 +119,18 @@ public class AdminController : ControllerBase
         {
             var totalUsers = await _userService.GetActiveUserCountAsync();
             var roleStats = await _roleService.GetRoleStatisticsAsync();
-            var adminCount = roleStats.GetValueOrDefault(UserRole.Admin, 0);
+            var platformAdminCount = roleStats.GetValueOrDefault(UserRole.PlatformAdmin, 0);
 
             return Ok(new
             {
                 TotalUsers = totalUsers,
-                AdminUsers = adminCount,
-                User1Count = roleStats.GetValueOrDefault(UserRole.User1, 0),
-                User2Count = roleStats.GetValueOrDefault(UserRole.User2, 0),
+                PlatformAdminUsers = platformAdminCount,
+                HomeownerCount = roleStats.GetValueOrDefault(UserRole.Homeowner, 0),
+                ContractorCount = roleStats.GetValueOrDefault(UserRole.Contractor, 0),
+                ProjectManagerCount = roleStats.GetValueOrDefault(UserRole.ProjectManager, 0),
+                ServiceClientCount = roleStats.GetValueOrDefault(UserRole.ServiceClient, 0),
                 UsersWithoutRole = totalUsers - roleStats.Values.Sum(),
-                IsBootstrapRequired = adminCount == 0,
+                IsBootstrapRequired = platformAdminCount == 0,
                 AvailableRoles = Enum.GetValues<UserRole>().Select(r => new
                 {
                     Value = r,
@@ -152,8 +160,8 @@ public class AdminController : ControllerBase
     {
         try
         {
-            // Check if any admin exists
-            var existingAdmins = await _roleService.GetUsersByRoleAsync(UserRole.Admin);
+            // Check if any platform admin exists
+            var existingAdmins = await _roleService.GetUsersByRoleAsync(UserRole.PlatformAdmin);
             if (existingAdmins.Any())
             {
                 return BadRequest(new ApiResponse
@@ -215,6 +223,120 @@ public class AdminController : ControllerBase
             {
                 Success = false,
                 Message = "An error occurred during role assignment"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Sync user with Keycloak (admin operation)
+    /// </summary>
+    [HttpPost("sync-user-keycloak/{userId}")]
+    public async Task<ActionResult<ApiResponse>> SyncUserWithKeycloak(int userId)
+    {
+        try
+        {
+            var user = await _userService.GetUserByIdAsync(userId);
+            if (user == null)
+            {
+                return NotFound(new ApiResponse
+                {
+                    Success = false,
+                    Message = "User not found"
+                });
+            }
+
+            var success = await _keycloakService.SyncUserAsync(user);
+            if (success)
+            {
+                return Ok(new ApiResponse
+                {
+                    Success = true,
+                    Message = $"User {user.Email} synchronized with Keycloak successfully"
+                });
+            }
+            else
+            {
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "Failed to synchronize user with Keycloak"
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error syncing user {UserId} with Keycloak", userId);
+            return StatusCode(500, new ApiResponse
+            {
+                Success = false,
+                Message = "An error occurred during Keycloak synchronization"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Get Keycloak user information
+    /// </summary>
+    [HttpGet("keycloak-user/{userId}")]
+    public async Task<ActionResult<object>> GetKeycloakUser(int userId)
+    {
+        try
+        {
+            var user = await _userService.GetUserByIdAsync(userId);
+            if (user == null)
+            {
+                return NotFound(new ApiResponse
+                {
+                    Success = false,
+                    Message = "User not found"
+                });
+            }
+
+            if (string.IsNullOrEmpty(user.KeycloakId))
+            {
+                return BadRequest(new ApiResponse
+                {
+                    Success = false,
+                    Message = "User is not linked to Keycloak"
+                });
+            }
+
+            var keycloakUser = await _keycloakService.GetUserAsync(user.KeycloakId);
+            if (keycloakUser == null)
+            {
+                return NotFound(new ApiResponse
+                {
+                    Success = false,
+                    Message = "User not found in Keycloak"
+                });
+            }
+
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    LocalUser = new
+                    {
+                        user.Id,
+                        user.Email,
+                        user.FirstName,
+                        user.LastName,
+                        user.KeycloakId,
+                        user.IsActive,
+                        CurrentRole = user.GetCurrentRole()
+                    },
+                    KeycloakUser = keycloakUser
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting Keycloak user for {UserId}", userId);
+            return StatusCode(500, new ApiResponse
+            {
+                Success = false,
+                Message = "An error occurred while retrieving Keycloak user information"
             });
         }
     }

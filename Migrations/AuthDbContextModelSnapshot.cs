@@ -70,7 +70,7 @@ namespace AuthService.Migrations
                     b.HasIndex("Email", "IsUsed")
                         .HasDatabaseName("IX_EmailVerificationTokens_Email_IsUsed");
 
-                    b.ToTable("EmailVerificationTokens");
+                    b.ToTable("EmailVerificationTokens", (string)null);
                 });
 
             modelBuilder.Entity("AuthService.Models.OtpToken", b =>
@@ -119,7 +119,7 @@ namespace AuthService.Migrations
                     b.HasIndex("PhoneNumber", "Token")
                         .HasDatabaseName("IX_OtpTokens_PhoneNumber_Token");
 
-                    b.ToTable("OtpTokens");
+                    b.ToTable("OtpTokens", (string)null);
                 });
 
             modelBuilder.Entity("AuthService.Models.PasswordResetToken", b =>
@@ -173,7 +173,7 @@ namespace AuthService.Migrations
                     b.HasIndex("UserId", "IsUsed", "ExpiresAt")
                         .HasDatabaseName("IX_PasswordResetTokens_UserId_IsUsed_ExpiresAt");
 
-                    b.ToTable("PasswordResetTokens");
+                    b.ToTable("PasswordResetTokens", (string)null);
                 });
 
             modelBuilder.Entity("AuthService.Models.RefreshToken", b =>
@@ -231,7 +231,7 @@ namespace AuthService.Migrations
                     b.HasIndex("UserId", "IsRevoked", "ExpiresAt")
                         .HasDatabaseName("IX_RefreshTokens_UserId_IsRevoked_ExpiresAt");
 
-                    b.ToTable("RefreshTokens");
+                    b.ToTable("RefreshTokens", (string)null);
                 });
 
             modelBuilder.Entity("AuthService.Models.User", b =>
@@ -295,7 +295,7 @@ namespace AuthService.Migrations
                         .IsUnique()
                         .HasFilter("\"PhoneNumber\" IS NOT NULL");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("AuthService.Models.UserRoleAssignment", b =>
@@ -340,7 +340,7 @@ namespace AuthService.Migrations
                     b.HasIndex("UserId", "Role", "RevokedAt")
                         .HasDatabaseName("IX_UserRoleAssignments_UserId_Role_RevokedAt");
 
-                    b.ToTable("UserRoleAssignments");
+                    b.ToTable("UserRoleAssignments", (string)null);
                 });
 
             modelBuilder.Entity("AuthService.Models.EmailVerificationToken", b =>

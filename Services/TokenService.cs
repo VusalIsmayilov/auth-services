@@ -260,5 +260,29 @@ namespace AuthService.Services
                 return 0;
             }
         }
+
+        public object GetJwks()
+        {
+            // For HMAC SHA256, we expose the key identifier and algorithm info
+            // Note: In production, consider using RSA keys for better security
+            using var sha256 = SHA256.Create();
+            var keyId = Convert.ToBase64String(sha256.ComputeHash(Encoding.UTF8.GetBytes(_secretKey))).Substring(0, 8);
+            
+            return new
+            {
+                keys = new[]
+                {
+                    new
+                    {
+                        kty = "oct", // Key type: octet sequence (symmetric key)
+                        use = "sig", // Usage: signature
+                        alg = "HS256", // Algorithm: HMAC SHA256
+                        kid = keyId, // Key ID
+                        // Note: For HMAC, the actual key is not exposed in JWKS
+                        // This is a simplified JWKS for documentation purposes
+                    }
+                }
+            };
+        }
     }
 }

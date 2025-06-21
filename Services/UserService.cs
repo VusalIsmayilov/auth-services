@@ -13,6 +13,7 @@ namespace AuthService.Services
         private readonly IOtpService _otpService;
         private readonly IEmailVerificationService _emailVerificationService;
         private readonly IEmailService _emailService;
+        private readonly IKeycloakService _keycloakService;
         private readonly ILogger<UserService> _logger;
 
         public UserService(
@@ -21,6 +22,7 @@ namespace AuthService.Services
             IOtpService otpService,
             IEmailVerificationService emailVerificationService,
             IEmailService emailService,
+            IKeycloakService keycloakService,
             ILogger<UserService> logger)
         {
             _context = context;
@@ -28,6 +30,7 @@ namespace AuthService.Services
             _otpService = otpService;
             _emailVerificationService = emailVerificationService;
             _emailService = emailService;
+            _keycloakService = keycloakService;
             _logger = logger;
         }
 
@@ -64,6 +67,24 @@ namespace AuthService.Services
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow
                 };
+
+                // Create user in Keycloak platform realm first
+                _logger.LogInformation("Attempting to create user in Keycloak: {Email}", email);
+                var keycloakId = await _keycloakService.CreateUserAsync(
+                    email, 
+                    firstName ?? "", 
+                    lastName ?? "", 
+                    password);
+
+                if (!string.IsNullOrEmpty(keycloakId))
+                {
+                    user.KeycloakId = keycloakId;
+                    _logger.LogInformation("User created in Keycloak platform realm: {KeycloakId}", keycloakId);
+                }
+                else
+                {
+                    _logger.LogError("Failed to create user in Keycloak, proceeding with local registration: {Email}", email);
+                }
 
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();

@@ -24,24 +24,60 @@ public class RequirePermissionAttribute : AuthorizeAttribute
     }
 }
 
-public class AdminOnlyAttribute : RequireRoleAttribute
+public class PlatformAdminOnlyAttribute : RequireRoleAttribute
 {
-    public AdminOnlyAttribute() : base(UserRole.Admin) { }
+    public PlatformAdminOnlyAttribute() : base(UserRole.PlatformAdmin) { }
 }
 
-public class User1AccessAttribute : AuthorizeAttribute
+public class HomeownerAccessAttribute : RequireRoleAttribute
 {
-    public User1AccessAttribute()
+    public HomeownerAccessAttribute() : base(UserRole.Homeowner) { }
+}
+
+public class ContractorAccessAttribute : RequireRoleAttribute
+{
+    public ContractorAccessAttribute() : base(UserRole.Contractor) { }
+}
+
+public class ProjectManagerAccessAttribute : RequireRoleAttribute
+{
+    public ProjectManagerAccessAttribute() : base(UserRole.ProjectManager) { }
+}
+
+public class ServiceClientAccessAttribute : RequireRoleAttribute
+{
+    public ServiceClientAccessAttribute() : base(UserRole.ServiceClient) { }
+}
+
+public class PlatformUserAttribute : AuthorizeAttribute
+{
+    public PlatformUserAttribute()
     {
-        Policy = "User1Access";
+        Policy = "PlatformUser";
     }
 }
 
-public class User2AccessAttribute : AuthorizeAttribute
+public class AnyRealmAttribute : AuthorizeAttribute
 {
-    public User2AccessAttribute()
+    public AnyRealmAttribute()
     {
-        Policy = "User2Access";
+        Policy = "AnyRealm";
+    }
+}
+
+public class PlatformRealmAttribute : AuthorizeAttribute
+{
+    public PlatformRealmAttribute()
+    {
+        Policy = "PlatformRealm";
+    }
+}
+
+public class ServiceRealmAttribute : AuthorizeAttribute
+{
+    public ServiceRealmAttribute()
+    {
+        Policy = "ServiceRealm";
     }
 }
 
@@ -49,6 +85,21 @@ public class ValidUserAttribute : AuthorizeAttribute
 {
     public ValidUserAttribute()
     {
-        Policy = "ValidUser";
+        Policy = "PlatformUser";
     }
+}
+
+public class AuthenticatedUserAttribute : AuthorizeAttribute
+{
+    public AuthenticatedUserAttribute()
+    {
+        Policy = "AuthenticatedUser";
+    }
+}
+
+// Legacy attribute for backward compatibility (maps to PlatformAdmin)
+[Obsolete("Use PlatformAdminOnlyAttribute instead")]
+public class AdminOnlyAttribute : RequireRoleAttribute
+{
+    public AdminOnlyAttribute() : base(UserRole.PlatformAdmin) { }
 }

@@ -9,11 +9,13 @@ namespace AuthService.Services;
 public class RoleService : IRoleService
 {
     private readonly AuthDbContext _context;
+    private readonly IKeycloakService _keycloakService;
     private readonly ILogger<RoleService> _logger;
 
-    public RoleService(AuthDbContext context, ILogger<RoleService> logger)
+    public RoleService(AuthDbContext context, IKeycloakService keycloakService, ILogger<RoleService> logger)
     {
         _context = context;
+        _keycloakService = keycloakService;
         _logger = logger;
     }
 
@@ -49,6 +51,20 @@ public class RoleService : IRoleService
 
             _context.UserRoleAssignments.Add(roleAssignment);
             await _context.SaveChangesAsync();
+
+            // Assign role in Keycloak if user has KeycloakId
+            if (!string.IsNullOrEmpty(user.KeycloakId))
+            {
+                var keycloakSuccess = await _keycloakService.AssignRoleAsync(user.KeycloakId, role);
+                if (!keycloakSuccess)
+                {
+                    _logger.LogWarning("Failed to assign role {Role} in Keycloak for user {UserId}", role, userId);
+                }
+                else
+                {
+                    _logger.LogInformation("Role {Role} assigned in Keycloak for user {UserId}", role, userId);
+                }
+            }
 
             _logger.LogInformation("Role {Role} assigned to user {UserId} by user {AssignedBy}", 
                 role, userId, assignedByUserId);

@@ -16,11 +16,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new() { Title = "AuthService API", Version = "v1" });
-
+    
     // Add JWT authentication to Swagger
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
+        Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token in the text input below.\r\n\r\nExample: \"Bearer 12345abcdef\"",
         Name = "Authorization",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
@@ -56,17 +56,20 @@ var jwtKey = builder.Configuration["JWT:SecretKey"];
 var jwtIssuer = builder.Configuration["JWT:Issuer"];
 var jwtAudience = builder.Configuration["JWT:Audience"];
 
-// Keycloak Configuration
-var keycloakAuthority = builder.Configuration["Keycloak:Authority"];
-var keycloakClientId = builder.Configuration["Keycloak:ClientId"];
-var keycloakAudience = builder.Configuration["Keycloak:Audience"];
+// Keycloak Configuration - Dual Realm Support
+var keycloakBaseUrl = builder.Configuration["Keycloak:BaseUrl"];
+var keycloakServiceAuthority = builder.Configuration["Keycloak:ServiceRealm:Authority"];
+var keycloakPlatformAuthority = builder.Configuration["Keycloak:PlatformRealm:Authority"];
+var keycloakServiceClientId = builder.Configuration["Keycloak:ServiceRealm:ClientId"];
+var keycloakPlatformClientId = builder.Configuration["Keycloak:PlatformRealm:ClientId"];
+var keycloakDefaultRealm = builder.Configuration["Keycloak:DefaultRealm"] ?? "platform";
 
 if (string.IsNullOrEmpty(jwtKey) || string.IsNullOrEmpty(jwtIssuer) || string.IsNullOrEmpty(jwtAudience))
 {
     throw new InvalidOperationException("JWT configuration is missing. Please check JWT:SecretKey, JWT:Issuer, and JWT:Audience in appsettings.json");
 }
 
-// Dual Authentication: Internal JWT + Keycloak
+// Multi-Authentication: Internal JWT + Keycloak Service Realm + Keycloak Platform Realm
 builder.Services.AddAuthentication()
     .AddJwtBearer("Internal", options =>
     {
@@ -82,17 +85,33 @@ builder.Services.AddAuthentication()
             ClockSkew = TimeSpan.Zero
         };
     })
-    .AddJwtBearer("Keycloak", options =>
+    .AddJwtBearer("KeycloakService", options =>
     {
-        if (!string.IsNullOrEmpty(keycloakAuthority))
+        if (!string.IsNullOrEmpty(keycloakServiceAuthority))
         {
-            options.Authority = keycloakAuthority;
+            options.Authority = keycloakServiceAuthority;
             options.RequireHttpsMetadata = false; // For development
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
                 ValidateAudience = true,
-                ValidAudience = keycloakAudience ?? "account",
+                ValidAudience = "account",
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            };
+        }
+    })
+    .AddJwtBearer("KeycloakPlatform", options =>
+    {
+        if (!string.IsNullOrEmpty(keycloakPlatformAuthority))
+        {
+            options.Authority = keycloakPlatformAuthority;
+            options.RequireHttpsMetadata = false; // For development
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidAudience = "account",
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
@@ -109,37 +128,6 @@ builder.Services.AddAuthentication(options =>
 // Authorization Policies for Role-Based Access
 builder.Services.AddAuthorization(options =>
 {
-    // Admin-only policies
-    options.AddPolicy("AdminOnly", policy =>
-        policy.RequireRole("Admin")
-              .RequireAuthenticatedUser());
-
-    // User1-specific policies
-    options.AddPolicy("User1Access", policy =>
-        policy.RequireAssertion(context =>
-            context.User.IsInRole("Admin") || context.User.IsInRole("User1")));
-
-    // User2-specific policies
-    options.AddPolicy("User2Access", policy =>
-        policy.RequireAssertion(context =>
-            context.User.IsInRole("Admin") || context.User.IsInRole("User2")));
-
-    // Admin or User1 policies
-    options.AddPolicy("AdminOrUser1", policy =>
-        policy.RequireAssertion(context =>
-            context.User.IsInRole("Admin") || context.User.IsInRole("User1")));
-
-    // Admin or User2 policies
-    options.AddPolicy("AdminOrUser2", policy =>
-        policy.RequireAssertion(context =>
-            context.User.IsInRole("Admin") || context.User.IsInRole("User2")));
-
-    // Any authenticated user with valid role
-    options.AddPolicy("ValidUser", policy =>
-        policy.RequireAssertion(context =>
-            context.User.IsInRole("Admin") || 
-            context.User.IsInRole("User1") || 
-            context.User.IsInRole("User2")));
 
     // Permission-based policies
     options.AddPolicy("CanManageUsers", policy =>
@@ -150,6 +138,49 @@ builder.Services.AddAuthorization(options =>
 
     options.AddPolicy("CanWriteData", policy =>
         policy.RequireClaim("permission", "data:write"));
+
+    // Platform-specific policies (for end users: homeowners, contractors, platform admins)
+    options.AddPolicy("PlatformAdmin", policy =>
+        policy.RequireRole("platform-admin")
+              .RequireAuthenticatedUser());
+
+    options.AddPolicy("Homeowner", policy =>
+        policy.RequireRole("homeowner")
+              .RequireAuthenticatedUser());
+
+    options.AddPolicy("Contractor", policy =>
+        policy.RequireRole("contractor")
+              .RequireAuthenticatedUser());
+
+    options.AddPolicy("ProjectManager", policy =>
+        policy.RequireRole("project-manager")
+              .RequireAuthenticatedUser());
+
+    // Platform user policies
+    options.AddPolicy("PlatformUser", policy =>
+        policy.RequireAssertion(context =>
+            context.User.IsInRole("platform-admin") || 
+            context.User.IsInRole("homeowner") || 
+            context.User.IsInRole("contractor") ||
+            context.User.IsInRole("project-manager")));
+
+    // Service-to-service policies (for microservice authentication)
+    options.AddPolicy("ServiceAccess", policy =>
+        policy.RequireRole("service-client")
+              .AddAuthenticationSchemes("KeycloakService"));
+
+    // Multi-realm authentication policies
+    options.AddPolicy("AnyRealm", policy =>
+        policy.AddAuthenticationSchemes("Internal", "KeycloakService", "KeycloakPlatform")
+              .RequireAuthenticatedUser());
+
+    options.AddPolicy("PlatformRealm", policy =>
+        policy.AddAuthenticationSchemes("KeycloakPlatform")
+              .RequireAuthenticatedUser());
+
+    options.AddPolicy("ServiceRealm", policy =>
+        policy.AddAuthenticationSchemes("KeycloakService")
+              .RequireAuthenticatedUser());
 });
 
 // CORS Configuration
@@ -166,6 +197,9 @@ builder.Services.AddCors(options =>
 // Email Configuration
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 
+// Register HTTP Client for Keycloak
+builder.Services.AddHttpClient<IKeycloakService, KeycloakService>();
+
 // Register Services
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -175,6 +209,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 builder.Services.AddScoped<IRoleService, RoleService>();
+builder.Services.AddScoped<IKeycloakService, KeycloakService>();
 
 // Background Services
 builder.Services.AddHostedService<OtpCleanupService>();
@@ -271,22 +306,38 @@ app.MapGet("/health", async (AuthDbContext context) =>
 app.MapGet("/", () => new
 {
     Service = "AuthService API",
-    Version = "1.1.0",
+    Version = "2.0.0",
     Features = new[] {
         "Email + Password Authentication",
-        "Phone + OTP Authentication",
+        "Phone + OTP Authentication", 
         "Email Verification System",
         "Password Reset System",
-        "Role-Based Access Control (Admin, User1, User2)",
-        "Keycloak Integration Support",
+        "Role-Based Access Control (Platform Roles)",
+        "Dual-Realm Keycloak Integration (Platform + Service)",
+        "Platform Roles (Admin, Homeowner, Contractor, Project Manager)",
+        "Service-to-Service Authentication",
         "JWT Access Tokens (15 min)",
         "Refresh Tokens (7 days)",
         "Token Refresh & Rotation",
         "Multi-device Support",
-        "Background Token Cleanup"
+        "Background Token Cleanup",
+        "JWKS Token Verification Support"
+    },
+    SupportedRoles = new[] {
+        "PlatformAdmin - Platform administrator with full access",
+        "Homeowner - Property owners who create renovation projects",
+        "Contractor - Professional contractors who bid on projects", 
+        "ProjectManager - Managers who oversee renovation projects",
+        "ServiceClient - Service-to-service authentication"
+    },
+    Realms = new {
+        Platform = "End-user authentication (homeowners, contractors, admins)",
+        Service = "Service-to-service authentication between microservices"
     },
     Documentation = "/swagger",
-    Health = "/health"
+    Health = "/health",
+    JWKS = "/.well-known/jwks.json",
+    OpenIDConfig = "/.well-known/openid_configuration"
 });
 
 app.Run();

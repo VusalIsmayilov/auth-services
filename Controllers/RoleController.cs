@@ -29,7 +29,7 @@ public class RoleController : ControllerBase
     /// Assign a role to a user (Admin only)
     /// </summary>
     [HttpPost("assign")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public async Task<ActionResult<ApiResponse>> AssignRole([FromBody] AssignRoleRequest request)
     {
         try
@@ -90,7 +90,7 @@ public class RoleController : ControllerBase
     /// Revoke a role from a user (Admin only)
     /// </summary>
     [HttpPost("revoke")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public async Task<ActionResult<ApiResponse>> RevokeRole([FromBody] RevokeRoleRequest request)
     {
         try
@@ -144,7 +144,7 @@ public class RoleController : ControllerBase
     /// Get all users with their current roles (Admin only)
     /// </summary>
     [HttpGet("users")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public async Task<ActionResult<List<UserWithRoleResponse>>> GetUsersWithRoles()
     {
         try
@@ -184,7 +184,7 @@ public class RoleController : ControllerBase
     /// Get users by specific role (Admin only)
     /// </summary>
     [HttpGet("users/{role}")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public async Task<ActionResult<List<UserWithRoleResponse>>> GetUsersByRole(UserRole role)
     {
         try
@@ -222,7 +222,7 @@ public class RoleController : ControllerBase
     /// Get role assignment history for a user (Admin only)
     /// </summary>
     [HttpGet("history/{userId}")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public async Task<ActionResult<List<RoleAssignmentResponse>>> GetUserRoleHistory(int userId)
     {
         try
@@ -257,7 +257,7 @@ public class RoleController : ControllerBase
     /// Get role statistics (Admin only)
     /// </summary>
     [HttpGet("statistics")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public async Task<ActionResult<RoleStatisticsResponse>> GetRoleStatistics()
     {
         try
@@ -369,7 +369,7 @@ public class RoleController : ControllerBase
     /// Get available roles and their descriptions (Admin only)
     /// </summary>
     [HttpGet("available")]
-    [AdminOnly]
+    [PlatformAdminOnly]
     public ActionResult<object> GetAvailableRoles()
     {
         try
